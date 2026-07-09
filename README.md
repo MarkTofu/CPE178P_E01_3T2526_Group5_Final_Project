@@ -14,7 +14,7 @@ Built with MobileNetV2 transfer learning and TensorFlow.js. Runs entirely in the
 
 1. Clone the repo
    ```bash
-   git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git
+   git clone https://https://github.com/MarkTofu/CPE178P_E01_3T2526_Group5_Final_Project
    cd YOUR_REPO_NAME
    ```
 
