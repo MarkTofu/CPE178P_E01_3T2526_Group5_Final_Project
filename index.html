@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Philippine Bill Detector</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #F7F6F2;
+      color: #1A1A18;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 56px 24px 80px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+
+    header h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+    }
+
+    header p {
+      font-size: 14px;
+      color: #6B6A65;
+      margin-top: 6px;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 460px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Upload zone */
+    .upload-zone {
+      background: #fff;
+      border: 1.5px dashed #CCC9BF;
+      border-radius: 14px;
+      padding: 52px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      user-select: none;
+    }
+
+    .upload-zone:hover, .upload-zone.over {
+      border-color: #1B4FD8;
+      background: #F0F4FF;
+    }
+
+    .upload-zone svg {
+      width: 36px;
+      height: 36px;
+      color: #B0AEA6;
+      margin-bottom: 12px;
+    }
+
+    .upload-zone p { font-size: 14px; color: #6B6A65; }
+    .upload-zone strong { color: #1B4FD8; font-weight: 500; }
+    .upload-zone small { font-size: 12px; color: #A09F98; margin-top: 4px; display: block; }
+
+    input[type="file"] { display: none; }
+
+    /* Preview */
+    #preview {
+      display: none;
+      background: #fff;
+      border: 1px solid #E5E4DE;
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    #preview img {
+      width: 100%;
+      max-height: 260px;
+      object-fit: contain;
+      display: block;
+      background: #F7F6F2;
+    }
+
+    /* Result card */
+    #result {
+      display: none;
+      background: #fff;
+      border: 1px solid #E5E4DE;
+      border-radius: 14px;
+      padding: 32px 24px;
+      text-align: center;
+    }
+
+    #result .eyebrow {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #A09F98;
+      margin-bottom: 10px;
+    }
+
+    #result .denomination {
+      font-size: 72px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -2px;
+      margin-bottom: 10px;
+      transition: color 0.2s;
+    }
+
+    #result .confidence {
+      font-size: 14px;
+      color: #6B6A65;
+    }
+
+    /* Status line */
+    #status {
+      display: none;
+      font-size: 13px;
+      color: #A09F98;
+      text-align: center;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #E5E4DE;
+      border-top-color: #1B4FD8;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Philippine Bill Detector</h1>
+  <p>Upload a photo of a Philippine paper bill to identify it.</p>
+</header>
+
+<div class="wrap">
+  <div class="upload-zone" id="zone">
+    <input type="file" id="fileInput" accept="image/*">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4M8 9l4-4 4 4M12 5v10"/>
+    </svg>
+    <p><strong>Click to upload</strong> or drag and drop</p>
+    <small>JPG or PNG</small>
+  </div>
+
+  <div id="preview"><img id="img" alt="Uploaded bill"></div>
+
+  <div id="result">
+    <div class="eyebrow">Detected Bill</div>
+    <div class="denomination" id="denom">—</div>
+    <div class="confidence" id="conf"></div>
+  </div>
+
+  <div id="status"><span class="spinner"></span> Loading model…</div>
+</div>
+
+<script>
+const CLASSES = ['₱20', '₱50', '₱100', '₱500', '₱1000'];
+
+const COLORS = {
+  '₱20':   '#C96A12',
+  '₱50':   '#B52C2C',
+  '₱100':  '#7B3FA0',
+  '₱500':  '#A07C10',
+  '₱1000': '#1B4FD8',
+};
+
+const THRESHOLD = 0.70;
+const IMG_SIZE  = 224;
+
+let model = null;
+
+// ── Model loading ─────────────────────────────────────────────────────────────
+
+async function loadModel() {
+  try {
+    // Treat as raw graph asset map to read weights directly from the JSON configurations
+    model = await tf.loadGraphModel('model/tfjs/model.json');
+    setStatus('');
+  } catch (err) {
+    console.error("Initialization check caught standard fallback handling:", err);
+    
+    // Safety check fallback: try parsing via execution pipeline blocks if manifest structure shifted
+    try {
+      model = await tf.loadLayersModel('model/tfjs/model.json');
+      setStatus('');
+    } catch (layersErr) {
+      console.error("Secondary evaluation block caught structure exception:", layersErr);
+      setStatus('⚠️ Model initialization failure. Ensure your model files match your server root layout.');
+    }
+  }
+}
+
+// ── Inference ─────────────────────────────────────────────────────────────────
+
+async function predict(imgEl) {
+  if (!model) return;
+
+  setStatus('<span class="spinner"></span> Analyzing…');
+  document.getElementById('result').style.display = 'none';
+  await tf.nextFrame();
+
+  const probs = tf.tidy(() => {
+    const tensor = tf.browser.fromPixels(imgEl)
+      .resizeBilinear([IMG_SIZE, IMG_SIZE])
+      .toFloat()
+      .expandDims(0);
+    
+    const prediction = model.predict(tensor);
+    return Array.isArray(prediction) ? prediction[0] : prediction;
+  });
+
+  const values = await probs.data();
+  probs.dispose();
+
+  const maxIdx  = values.indexOf(Math.max(...values));
+  const maxProb = values[maxIdx];
+
+  const denomEl = document.getElementById('denom');
+  const confEl  = document.getElementById('conf');
+
+  if (maxProb < THRESHOLD) {
+    denomEl.textContent   = 'Not a bill';
+    denomEl.style.color   = '#1A1A18';
+    denomEl.style.fontSize = '36px';
+    confEl.textContent    = `Best match: ${(maxProb * 100).toFixed(1)}% — below detection threshold`;
+  } else {
+    const label = CLASSES[maxIdx];
+    denomEl.textContent    = label;
+    denomEl.style.color    = COLORS[label];
+    denomEl.style.fontSize = '72px';
+    confEl.textContent     = `${(maxProb * 100).toFixed(1)}% confident`;
+  }
+
+  document.getElementById('result').style.display = 'block';
+  setStatus('');
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+
+function setStatus(html) {
+  const el = document.getElementById('status');
+  el.innerHTML = html;
+  el.style.display = html ? 'block' : 'none';
+}
+
+function handleFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  const img  = document.getElementById('img');
+  img.onload = () => predict(img);
+  img.src    = url;
+  document.getElementById('preview').style.display = 'block';
+}
+
+// ── Events ────────────────────────────────────────────────────────────────────
+
+document.getElementById('zone').addEventListener('click', () =>
+  document.getElementById('fileInput').click()
+);
+
+document.getElementById('fileInput').addEventListener('change', e =>
+  handleFile(e.target.files[0])
+);
+
+const zone = document.getElementById('zone');
+zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('over'); });
+zone.addEventListener('dragleave', ()  => zone.classList.remove('over'));
+zone.addEventListener('drop', e => {
+  e.preventDefault();
+  zone.classList.remove('over');
+  handleFile(e.dataTransfer.files[0]);
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+
+loadModel();
+</script>
+</body>
+</html>
