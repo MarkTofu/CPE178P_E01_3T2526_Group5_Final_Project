@@ -1,0 +1,10 @@
+# Training photos — too large and personal
+data/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS clutter
+.DS_Store
+Thumbs.db
